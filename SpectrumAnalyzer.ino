@@ -6,11 +6,6 @@
 #include "esp32/ulp.h"
 #include "driver/adc.h"     
 
-
-
-
-
-
 //------------------------------- TFT Display Init ------------------------------//
 TFT_eSPI tft = TFT_eSPI();  // Invoke library, pins defined in User_Setup.h
 void setupDisplay(void)
@@ -39,18 +34,16 @@ void setupEncoder(void)
   	//we must initialize rotary encoder
 	rotaryEncoder.begin();
 	rotaryEncoder.setup(readEncoderISR);
-	rotaryEncoder.setAcceleration(250); //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
+	rotaryEncoder.setAcceleration(0); //250); //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
 }
 
 //------------------------------- Si5351 Init ------------------------------//
 Si5351 si5351(0x60);
-uint64_t start_frequency = 6750000;
-uint64_t stop_frequency =  7250000;
+uint64_t start_frequency = 6500000;
+uint64_t stop_frequency =  7500000;
 uint64_t step_frequency = (stop_frequency-start_frequency)/160;
 uint64_t clk_1_frequency = start_frequency; // 7MHz
-
-//uint64_t clk_1_frequency = 10000000; // 7MHz
-
+uint64_t marker_1_frequency = (start_frequency+stop_frequency)/2;
 
 void setupSi5351()
 {
@@ -80,6 +73,20 @@ void updateTFT()
 
 }
 
+
+#define SW_4_PIN 19
+#define SW_3_PIN 16
+#define SW_2_PIN 4
+#define SW_ENCODER_PIN 32
+
+
+int mode = 0;
+int gain = 10;
+
+#define MODE_MARKER 0
+#define MODE_GAIN 1
+#define MODE_BW 2
+
 void setup()
 {
    Serial.begin(115200);
@@ -96,37 +103,113 @@ void setup()
 
   updateTFT();
 
-  adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_2_5);
-   adc1_config_width(ADC_WIDTH_BIT_12);
-   adc1_ulp_enable();
+  adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_0);
+  adc1_config_width(ADC_WIDTH_BIT_12);
+  adc1_ulp_enable();
 
 
-   tft.fillScreen(TFT_WHITE);
+  tft.fillScreen(TFT_WHITE);
 
+  tft.setTextColor(TFT_WHITE,TFT_BLACK );  
+  tft.drawString(" 7.000MHz ",45,0,2);
 
+  pinMode(SW_4_PIN, INPUT);
+  pinMode(SW_3_PIN, INPUT);
 
+  uint64_t bandwidth = stop_frequency - start_frequency;
+  float f = ((float)bandwidth)/1000000.0f;
 
+  tft.setTextColor(TFT_BLACK,TFT_WHITE );  
+  tft.drawString("BW "+String(f,1),3,3,1);
+
+  tft.setTextColor(TFT_BLACK,TFT_WHITE );  
+  tft.drawString("G "+String(gain)+" ",127,3,1);
 }
+
 
 
 
 // Main
 void loop()
 { 
- 	// if (rotaryEncoder.encoderChanged())
-	// {
-	// 	Serial.print("Value: ");
-	// 	Serial.println(rotaryEncoder.readEncoder());
 
-  //   long currentReading = rotaryEncoder.readEncoder();
-  //   long change =  currentReading -lastEncoderReading;
+  static bool draw_marker = true;
 
-  //   lastEncoderReading = currentReading;
+    int sw4 = digitalRead(SW_4_PIN);
+    if(sw4==1)
+      mode = MODE_GAIN;
 
-  //   clk_1_frequency += change*100;  
-  //   updateTFT();
-  //   si5351.set_freq(clk_1_frequency*100, SI5351_CLK0);   
-	// }
+    int sw3 = digitalRead(SW_3_PIN);
+    if(sw3==1)
+      mode =  MODE_BW;
+
+    int sw2 = digitalRead(SW_2_PIN);
+    if(sw2==1)
+      mode = MODE_MARKER;
+
+    switch(mode){
+      case MODE_MARKER :  tft.setTextColor(TFT_BLUE,TFT_WHITE );  
+                tft.drawString("Marker",30,115,2);
+                tft.setTextColor(TFT_BLACK,TFT_WHITE );  
+                tft.drawString("BW",85,115,2);
+                tft.setTextColor(TFT_BLACK,TFT_WHITE );  
+                tft.drawString("Gain",115,115,2);
+                break;
+      case  MODE_BW :  tft.setTextColor(TFT_BLACK,TFT_WHITE ); 
+                tft.drawString("Marker",30,115,2);
+                tft.setTextColor(TFT_BLUE,TFT_WHITE );  
+                tft.drawString("BW",85,115,2);
+                tft.setTextColor(TFT_BLACK,TFT_WHITE );  
+                tft.drawString("Gain",115,115,2);
+                break;
+      case  MODE_GAIN :  tft.setTextColor(TFT_BLACK,TFT_WHITE );  
+                tft.drawString("Marker",30,115,2);
+                tft.setTextColor(TFT_BLACK,TFT_WHITE );  
+                tft.drawString("BW",85,115,2);
+                tft.setTextColor(TFT_BLUE,TFT_WHITE );  
+                tft.drawString("Gain",115,115,2);
+                break;
+
+
+    };
+
+
+ 	if (rotaryEncoder.encoderChanged())
+	{
+		Serial.print("Value: ");
+		Serial.println(rotaryEncoder.readEncoder());
+
+    long currentReading = rotaryEncoder.readEncoder();
+    long change =  currentReading -lastEncoderReading;
+
+    lastEncoderReading = currentReading;
+
+    if(mode == 0){
+      marker_1_frequency += step_frequency * change;
+      float f = ((float)marker_1_frequency)/1000000.0f;
+      tft.setTextColor(TFT_WHITE,TFT_BLACK );  
+      tft.drawString(" "+String(f,3)+"MHz ",45,0,2);
+    }
+
+    if(mode == 1){
+      gain += change;
+      if(gain <= 1) gain = 1;
+      if(gain >= 20) gain = 20;
+      tft.setTextColor(TFT_BLACK,TFT_WHITE );  
+      tft.drawString("G "+String(gain)+" ",127,3,1);
+    }
+
+    if(mode == 2){
+      start_frequency -= change*50000;
+      stop_frequency  += change*50000;
+      step_frequency = (stop_frequency-start_frequency)/160;
+      uint64_t bandwidth = stop_frequency - start_frequency;
+      float f = ((float)bandwidth)/1000000.0f;
+      tft.setTextColor(TFT_BLACK,TFT_WHITE );  
+      tft.drawString("BW "+String(f,1),3,3,1);
+    }
+
+	}
 
     static int x_count = 0;
     
@@ -135,33 +218,47 @@ void loop()
     clk_1_frequency += step_frequency;
     if(clk_1_frequency > stop_frequency){
       clk_1_frequency = start_frequency;
-     // tft.fillScreen(TFT_WHITE);
       x_count = 0;
+      draw_marker = true;
     }
-
-    
-    //Serial.println(clk_1_frequency);
 
     delay(1);
 
-    //int potValue = analogRead(36);
     int value = adc1_get_raw(ADC1_CHANNEL_0);
 
-//        Serial.print(000); // To freeze the lower limit
-// Serial.print(" ");
-// Serial.print(4000); // To freeze the upper limit
-// Serial.print(" ");
+    Serial.print(000); // To freeze the lower limit
+    Serial.print(" ");
+    Serial.print(4000); // To freeze the upper limit
+    Serial.print(" ");
+    Serial.println(value);
 
-//     Serial.println(value);
-
-    for(int i =0;i<128;i++)
+    for(int i =13;i<115;i++)
     {
       tft.drawPixel(x_count,i , tft.color565(50,50,50));
     }
-    int y_value = 150 - ((value-1000)/10 );
-    tft.drawPixel(x_count,y_value , tft.color565(255,255,0));
-    tft.drawPixel(x_count,y_value-1 , tft.color565(255,255,0));
+
+    int y_value = 115 - ((value)/(21-gain));
+    if(y_value<=13)
+      {    
+      y_value=14;
+      tft.drawPixel(x_count,y_value , tft.color565(0,0,255));
+      tft.drawPixel(x_count,y_value-1 , tft.color565(0,0,255));
+      }
+      else
+      {
+      tft.drawPixel(x_count,y_value , tft.color565(255,255,0));
+      tft.drawPixel(x_count,y_value-1 , tft.color565(255,255,0));
+      }
+
+    if((clk_1_frequency / marker_1_frequency) == 1)
+      if(draw_marker == true)
+      {
+        for(int i =13;i<115;i++)
+        {
+          tft.drawPixel(x_count,i , tft.color565(255,255,255));
+        }
+        draw_marker = false;
+      }
 
     x_count++;
-
 }
